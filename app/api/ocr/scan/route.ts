@@ -1,7 +1,9 @@
 import { fail, ok } from "@/lib/http";
-import { createWorker } from "tesseract.js";
+import { recognize } from "tesseract.js";
 
 export const runtime = "nodejs";
+const tesseractWorkerPath =
+  process.cwd() + "/node_modules/tesseract.js/src/worker-script/node/index.js";
 
 const monthMap: Record<string, number> = {
   jan: 0,
@@ -85,9 +87,9 @@ export async function POST(req: Request) {
 
   try {
     const bytes = await file.arrayBuffer();
-    const worker = await createWorker("eng");
-    const result = await worker.recognize(Buffer.from(bytes));
-    await worker.terminate();
+    const result = await recognize(Buffer.from(bytes), "eng", {
+      workerPath: tesseractWorkerPath,
+    });
 
     const text = result.data.text ?? "";
     const expiryDate = parseExpiryDate(text);

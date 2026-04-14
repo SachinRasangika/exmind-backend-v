@@ -3,9 +3,265 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model User {
+  id               String                @id @default(uuid()) @db.Uuid
+  email            String                @unique
+  passwordHash     String?               @map("password_hash")
+  name             String
+  avatarUrl        String?               @map("avatar_url")
+  authProvider     AuthProvider          @default(email) @map("auth_provider")
+  biometricEnabled Boolean               @default(false) @map("biometric_enabled")
+  appLockEnabled   Boolean               @default(false) @map("app_lock_enabled")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+  activityFeeds    ActivityFeed[]
+  auditLogs        AuditLog[]
+  branchFeedbacks  BranchFeedback[]
+  documentsCreated Document[]            @relation("DocumentCreator")
+  errorLogs        ErrorLog[]
+  notifications    Notification[]
+  settings         UserSettings?
+  gmailIntegration GmailIntegration?
+  invitationsSent  WorkspaceInvitation[] @relation("InvitationSender")
+  workspaceMembers WorkspaceMember[]
+  ownedWorkspaces  Workspace[]           @relation("WorkspaceOwner")
+
+  @@map("users")
+}
+
+model GmailIntegration {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  email              String
+  accessToken        String   @map("access_token")
+  refreshToken       String?  @map("refresh_token")
+  tokenType          String   @default("Bearer") @map("token_type")
+  scope              String
+  expiryDate         DateTime @map("expiry_date")
+  connectedAt        DateTime @default(now()) @map("connected_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  lastSyncedAt       DateTime? @map("last_synced_at")
+  watchHistoryId     String?   @map("watch_history_id")
+  watchExpirationMs  BigInt?   @map("watch_expiration_ms")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("gmail_integrations")
+}
+
+model Workspace {
+  id              String                @id @default(uuid()) @db.Uuid
+  name            String
+  type            WorkspaceType
+  ownerId         String                @map("owner_id") @db.Uuid
+  inviteLinkToken String?               @unique @map("invite_link_token")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  activityFeed    ActivityFeed[]
+  auditLogs       AuditLog[]
+  documents       Document[]
+  invitations     WorkspaceInvitation[]
+  members         WorkspaceMember[]
+  owner           User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id              String               @id @default(uuid()) @db.Uuid
+  workspaceId     String               @map("workspace_id") @db.Uuid
+  userId          String               @map("user_id") @db.Uuid
+  role            WorkspaceRole
+  joinedAt        DateTime             @default(now()) @map("joined_at")
+  lastActiveAt    DateTime?            @map("last_active_at")
+  backupAssigned  DocumentAssignment[] @relation("BackupAssignee")
+  primaryAssigned DocumentAssignment[] @relation("PrimaryAssignee")
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+model Document {
+  id                 String              @id @default(uuid()) @db.Uuid
+  workspaceId        String              @map("workspace_id") @db.Uuid
+  createdBy          String              @map("created_by") @db.Uuid
+  name               String
+  type               DocumentType
+  status             DocumentStatus
+  expiryDate         DateTime            @map("expiry_date") @db.Date
+  notes              String?
+  branchId           String?             @map("branch_id") @db.Uuid
+  scanImageUrl       String?             @map("scan_image_url")
+  ocrConfidenceScore Int?                @map("ocr_confidence_score")
+  ocrDetectedData    Json?               @map("ocr_detected_data")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  assignment         DocumentAssignment?
+  branch             Branch?             @relation(fields: [branchId], references: [id])
+  creator            User                @relation("DocumentCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  errorLogs          ErrorLog[]
+  notifications      Notification[]
+  reminders          Reminder[]
+
+  @@map("documents")
+}
+
+model DocumentAssignment {
+  id              String           @id @default(uuid()) @db.Uuid
+  documentId      String           @unique @map("document_id") @db.Uuid
+  primaryMemberId String           @map("primary_member_id") @db.Uuid
+  backupMemberId  String?          @map("backup_member_id") @db.Uuid
+  escalationDays  Int              @default(3) @map("escalation_days")
+  escalated       Boolean          @default(false)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  backupMember    WorkspaceMember? @relation("BackupAssignee", fields: [backupMemberId], references: [id])
+  document        Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  primaryMember   WorkspaceMember  @relation("PrimaryAssignee", fields: [primaryMemberId], references: [id], onDelete: Cascade)
+
+  @@map("document_assignments")
+}
+
+model Reminder {
+  id                   String       @id @default(uuid()) @db.Uuid
+  documentId           String       @map("document_id") @db.Uuid
+  type                 ReminderType
+  daysBefore           Int?         @map("days_before")
+  time                 String?      @db.VarChar(5)
+  locationRadiusMeters Int?         @map("location_radius_meters")
+  enabled              Boolean      @default(true)
+  createdAt            DateTime     @default(now()) @map("created_at")
+  document             Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("reminders")
+}
+
+model Branch {
+  id            String           @id @default(uuid()) @db.Uuid
+  name          String
+  address       String
+  latitude      Decimal          @db.Decimal(10, 7)
+  longitude     Decimal          @db.Decimal(10, 7)
+  phone         String?
+  status        BranchStatus
+  openingHours  Json             @map("opening_hours")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  feedbacks     BranchFeedback[]
+  documents     Document[]
+  notifications Notification[]
+
+  @@map("branches")
+}
+
+model BranchFeedback {
+  id               String   @id @default(uuid()) @db.Uuid
+  branchId         String   @map("branch_id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  isOpen           Boolean  @map("is_open")
+  timingsCorrect   Boolean  @map("timings_correct")
+  locationAccurate Boolean  @map("location_accurate")
+  comments         String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  branch           Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("branch_feedback")
+}
+
+model Notification {
+  id                String           @id @default(uuid()) @db.Uuid
+  userId            String           @map("user_id") @db.Uuid
+  title             String
+  message           String
+  type              NotificationType
+  read              Boolean          @default(false)
+  relatedDocumentId String?          @map("related_document_id") @db.Uuid
+  relatedBranchId   String?          @map("related_branch_id") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at")
+  branch            Branch?          @relation(fields: [relatedBranchId], references: [id])
+  document          Document?        @relation(fields: [relatedDocumentId], references: [id])
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  userId      String?     @map("user_id") @db.Uuid
+  action      AuditAction
+  targetType  String      @map("target_type")
+  targetId    String      @map("target_id") @db.Uuid
+  details     String
+  metadata    Json?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  user        User?       @relation(fields: [userId], references: [id])
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+model ErrorLog {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  type              ErrorType
+  message           String
+  relatedDocumentId String?   @map("related_document_id") @db.Uuid
+  canRetry          Boolean   @map("can_retry")
+  resolved          Boolean   @default(false)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  document          Document? @relation(fields: [relatedDocumentId], references: [id])
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("error_logs")
+}
+
+model WorkspaceInvitation {
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  invitedBy   String           @map("invited_by") @db.Uuid
+  email       String
+  role        WorkspaceRole
+  status      InvitationStatus @default(pending)
+  token       String           @unique
+  expiresAt   DateTime         @map("expires_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  sender      User             @relation("InvitationSender", fields: [invitedBy], references: [id], onDelete: Cascade)
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_invitations")
+}
+
+model UserSettings {
+  userId            String  @id @map("user_id") @db.Uuid
+  smartReminders    Boolean @default(true) @map("smart_reminders")
+  emailAlerts       Boolean @default(false) @map("email_alerts")
+  pushNotifications Boolean @default(true) @map("push_notifications")
+  locationServices  Boolean @default(true) @map("location_services")
+  backgroundAlerts  Boolean @default(true) @map("background_alerts")
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model ActivityFeed {
+  id          String       @id @default(uuid()) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  action      String
+  target      String
+  type        ActivityType
+  createdAt   DateTime     @default(now()) @map("created_at")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("activity_feed")
 }
 
 enum AuthProvider {
@@ -95,240 +351,4 @@ enum ActivityType {
   document_deleted
   member_invited
   reminder_sent
-}
-
-model User {
-  id                String                 @id @default(uuid()) @db.Uuid
-  email             String                 @unique
-  passwordHash      String?                @map("password_hash")
-  name              String
-  avatarUrl         String?                @map("avatar_url")
-  authProvider      AuthProvider           @default(email) @map("auth_provider")
-  biometricEnabled  Boolean                @default(false) @map("biometric_enabled")
-  appLockEnabled    Boolean                @default(false) @map("app_lock_enabled")
-  createdAt         DateTime               @default(now()) @map("created_at")
-  updatedAt         DateTime               @updatedAt @map("updated_at")
-  ownedWorkspaces   Workspace[]            @relation("WorkspaceOwner")
-  workspaceMembers  WorkspaceMember[]
-  documentsCreated  Document[]             @relation("DocumentCreator")
-  branchFeedbacks   BranchFeedback[]
-  notifications     Notification[]
-  auditLogs         AuditLog[]
-  errorLogs         ErrorLog[]
-  invitationsSent   WorkspaceInvitation[]  @relation("InvitationSender")
-  settings          UserSettings?
-  activityFeeds     ActivityFeed[]
-
-  @@map("users")
-}
-
-model Workspace {
-  id                String                 @id @default(uuid()) @db.Uuid
-  name              String
-  type              WorkspaceType
-  ownerId           String                 @map("owner_id") @db.Uuid
-  inviteLinkToken   String?                @unique @map("invite_link_token")
-  createdAt         DateTime               @default(now()) @map("created_at")
-  owner             User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members           WorkspaceMember[]
-  documents         Document[]
-  invitations       WorkspaceInvitation[]
-  auditLogs         AuditLog[]
-  activityFeed      ActivityFeed[]
-
-  @@map("workspaces")
-}
-
-model WorkspaceMember {
-  id              String         @id @default(uuid()) @db.Uuid
-  workspaceId     String         @map("workspace_id") @db.Uuid
-  userId          String         @map("user_id") @db.Uuid
-  role            WorkspaceRole
-  joinedAt        DateTime       @default(now()) @map("joined_at")
-  lastActiveAt    DateTime?      @map("last_active_at")
-  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  primaryAssigned DocumentAssignment[] @relation("PrimaryAssignee")
-  backupAssigned  DocumentAssignment[] @relation("BackupAssignee")
-
-  @@unique([workspaceId, userId])
-  @@map("workspace_members")
-}
-
-model Document {
-  id                  String          @id @default(uuid()) @db.Uuid
-  workspaceId         String          @map("workspace_id") @db.Uuid
-  createdBy           String          @map("created_by") @db.Uuid
-  name                String
-  type                DocumentType
-  status              DocumentStatus
-  expiryDate          DateTime        @map("expiry_date") @db.Date
-  notes               String?
-  branchId            String?         @map("branch_id") @db.Uuid
-  scanImageUrl        String?         @map("scan_image_url")
-  ocrConfidenceScore  Int?            @map("ocr_confidence_score")
-  ocrDetectedData     Json?           @map("ocr_detected_data")
-  createdAt           DateTime        @default(now()) @map("created_at")
-  updatedAt           DateTime        @updatedAt @map("updated_at")
-  workspace           Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  creator             User            @relation("DocumentCreator", fields: [createdBy], references: [id], onDelete: Cascade)
-  branch              Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  assignment          DocumentAssignment?
-  reminders           Reminder[]
-  notifications       Notification[]
-  errorLogs           ErrorLog[]
-
-  @@map("documents")
-}
-
-model DocumentAssignment {
-  id               String           @id @default(uuid()) @db.Uuid
-  documentId       String           @unique @map("document_id") @db.Uuid
-  primaryMemberId  String           @map("primary_member_id") @db.Uuid
-  backupMemberId   String?          @map("backup_member_id") @db.Uuid
-  escalationDays   Int              @default(3) @map("escalation_days")
-  escalated        Boolean          @default(false)
-  createdAt        DateTime         @default(now()) @map("created_at")
-  document         Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  primaryMember    WorkspaceMember  @relation("PrimaryAssignee", fields: [primaryMemberId], references: [id], onDelete: Cascade)
-  backupMember     WorkspaceMember? @relation("BackupAssignee", fields: [backupMemberId], references: [id], onDelete: SetNull)
-
-  @@map("document_assignments")
-}
-
-model Reminder {
-  id                   String       @id @default(uuid()) @db.Uuid
-  documentId           String       @map("document_id") @db.Uuid
-  type                 ReminderType
-  daysBefore           Int?         @map("days_before")
-  time                 String?      @db.VarChar(5)
-  locationRadiusMeters Int?         @map("location_radius_meters")
-  enabled              Boolean      @default(true)
-  createdAt            DateTime     @default(now()) @map("created_at")
-  document             Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@map("reminders")
-}
-
-model Branch {
-  id             String          @id @default(uuid()) @db.Uuid
-  name           String
-  address        String
-  latitude       Decimal         @db.Decimal(10, 7)
-  longitude      Decimal         @db.Decimal(10, 7)
-  phone          String?
-  status         BranchStatus
-  openingHours   Json            @map("opening_hours")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  documents      Document[]
-  feedbacks      BranchFeedback[]
-  notifications  Notification[]
-
-  @@map("branches")
-}
-
-model BranchFeedback {
-  id                String    @id @default(uuid()) @db.Uuid
-  branchId          String    @map("branch_id") @db.Uuid
-  userId            String    @map("user_id") @db.Uuid
-  isOpen            Boolean   @map("is_open")
-  timingsCorrect    Boolean   @map("timings_correct")
-  locationAccurate  Boolean   @map("location_accurate")
-  comments          String?
-  createdAt         DateTime  @default(now()) @map("created_at")
-  branch            Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("branch_feedback")
-}
-
-model Notification {
-  id                String            @id @default(uuid()) @db.Uuid
-  userId            String            @map("user_id") @db.Uuid
-  title             String
-  message           String
-  type              NotificationType
-  read              Boolean           @default(false)
-  relatedDocumentId String?           @map("related_document_id") @db.Uuid
-  relatedBranchId   String?           @map("related_branch_id") @db.Uuid
-  createdAt         DateTime          @default(now()) @map("created_at")
-  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document          Document?         @relation(fields: [relatedDocumentId], references: [id], onDelete: SetNull)
-  branch            Branch?           @relation(fields: [relatedBranchId], references: [id], onDelete: SetNull)
-
-  @@map("notifications")
-}
-
-model AuditLog {
-  id           String      @id @default(uuid()) @db.Uuid
-  workspaceId  String      @map("workspace_id") @db.Uuid
-  userId       String?     @map("user_id") @db.Uuid
-  action       AuditAction
-  targetType   String      @map("target_type")
-  targetId     String      @map("target_id") @db.Uuid
-  details      String
-  metadata     Json?
-  createdAt    DateTime    @default(now()) @map("created_at")
-  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  @@map("audit_logs")
-}
-
-model ErrorLog {
-  id                String     @id @default(uuid()) @db.Uuid
-  userId            String     @map("user_id") @db.Uuid
-  type              ErrorType
-  message           String
-  relatedDocumentId String?    @map("related_document_id") @db.Uuid
-  canRetry          Boolean    @map("can_retry")
-  resolved          Boolean    @default(false)
-  createdAt         DateTime   @default(now()) @map("created_at")
-  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document          Document?  @relation(fields: [relatedDocumentId], references: [id], onDelete: SetNull)
-
-  @@map("error_logs")
-}
-
-model WorkspaceInvitation {
-  id           String            @id @default(uuid()) @db.Uuid
-  workspaceId  String            @map("workspace_id") @db.Uuid
-  invitedBy    String            @map("invited_by") @db.Uuid
-  email        String
-  role         WorkspaceRole
-  status       InvitationStatus  @default(pending)
-  token        String            @unique
-  expiresAt    DateTime          @map("expires_at")
-  createdAt    DateTime          @default(now()) @map("created_at")
-  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sender       User              @relation("InvitationSender", fields: [invitedBy], references: [id], onDelete: Cascade)
-
-  @@map("workspace_invitations")
-}
-
-model UserSettings {
-  userId               String    @id @map("user_id") @db.Uuid
-  smartReminders       Boolean   @default(true) @map("smart_reminders")
-  emailAlerts          Boolean   @default(false) @map("email_alerts")
-  pushNotifications    Boolean   @default(true) @map("push_notifications")
-  locationServices     Boolean   @default(true) @map("location_services")
-  backgroundAlerts     Boolean   @default(true) @map("background_alerts")
-  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("user_settings")
-}
-
-model ActivityFeed {
-  id           String       @id @default(uuid()) @db.Uuid
-  workspaceId  String       @map("workspace_id") @db.Uuid
-  userId       String       @map("user_id") @db.Uuid
-  action       String
-  target       String
-  type         ActivityType
-  createdAt    DateTime     @default(now()) @map("created_at")
-  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("activity_feed")
 }

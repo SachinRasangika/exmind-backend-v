@@ -37,6 +37,7 @@ export async function GET(req: Request) {
       workspaceId: effectiveWorkspaceId ?? { in: allowedWorkspaceIds },
     },
     orderBy: { createdAt: "desc" },
+    include: { reminders: true },
   });
 
   const withComputedStatus = docs

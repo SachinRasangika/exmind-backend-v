@@ -18,6 +18,10 @@ const implemented = [
   "POST /api/location/check",
   "POST /api/ocr/scan",
   "GET /api/health",
+  "GET /api/integrations/gmail/connect-url",
+  "GET /api/integrations/gmail/callback",
+  "GET /api/integrations/gmail/status",
+  "DELETE /api/integrations/gmail/status",
 ];
 
 const planned = [

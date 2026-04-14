@@ -17,7 +17,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!user) return fail("Unauthorized", 401);
 
   const { id } = await ctx.params;
-  const document = await prisma.document.findUnique({ where: { id } });
+  const document = await prisma.document.findUnique({
+    where: { id },
+    include: { reminders: true },
+  });
   if (!document) return fail("Document not found", 404);
 
   const member = await prisma.workspaceMember.findFirst({
