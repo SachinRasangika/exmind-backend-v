@@ -3,6 +3,7 @@ import { fail, ok } from "@/lib/http";
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { computeDocumentStatus } from "@/lib/documents";
+import { onDocumentCreated } from "@/lib/workspace-events";
 
 const createDocumentSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -86,6 +87,13 @@ export async function POST(req: Request) {
       notes: parsed.data.notes ?? null,
       branchId: parsed.data.branchId ?? null,
     },
+  });
+
+  await onDocumentCreated({
+    workspaceId: document.workspaceId,
+    actorUserId: user.id,
+    documentId: document.id,
+    name: document.name,
   });
 
   return ok(document, 201);

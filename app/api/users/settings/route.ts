@@ -8,6 +8,7 @@ const settingsSchema = z.object({
   emailAlerts: z.boolean().optional(),
   pushNotifications: z.boolean().optional(),
   locationServices: z.boolean().optional(),
+  /** “Notify when near a branch” — persisted as `background_alerts`. */
   backgroundAlerts: z.boolean().optional(),
 });
 

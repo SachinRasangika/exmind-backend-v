@@ -1,6 +1,7 @@
 import { fail, ok } from "@/lib/http";
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { onDocumentRenewed } from "@/lib/workspace-events";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser(req);
@@ -22,6 +23,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const updated = await prisma.document.update({
     where: { id },
     data: { status: "renewed" },
+  });
+
+  await onDocumentRenewed({
+    workspaceId: updated.workspaceId,
+    actorUserId: user.id,
+    documentId: updated.id,
+    name: updated.name,
   });
 
   return ok(updated);
