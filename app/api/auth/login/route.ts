@@ -2,6 +2,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { fail, ok } from "@/lib/http";
 import { signAccessToken, verifyPassword } from "@/lib/auth";
+import { recordSessionWelcomeNotification } from "@/lib/session-welcome-notification";
+import { isEmailConfigured, sendLoginWelcomeEmail } from "@/lib/email";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -34,6 +36,22 @@ export async function POST(req: Request) {
   const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
     return fail("Invalid email or password", 401);
+  }
+
+  await recordSessionWelcomeNotification(user.id, {
+    displayName: user.name,
+    isNewAccount: false,
+  });
+  if (isEmailConfigured()) {
+    void sendLoginWelcomeEmail({
+      to: user.email,
+      displayName: user.name,
+    }).catch((err) => {
+      console.error("Failed to send login welcome email", {
+        userId: user.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   const accessToken = signAccessToken({ userId: user.id, email: user.email });

@@ -3,6 +3,7 @@ import { fail, ok } from "@/lib/http";
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { computeDocumentStatus } from "@/lib/documents";
+import { isEmailConfigured, sendLocationZoneAlertEmail } from "@/lib/email";
 
 const payloadSchema = z.object({
   lat: z.number().min(-90).max(90),
@@ -80,5 +81,97 @@ export async function POST(req: Request) {
     .filter((item) => item.distanceMeters <= parsed.data.radiusMeters && item.expiringDocuments.length > 0)
     .sort((a, b) => a.distanceMeters - b.distanceMeters);
 
-  return ok({ alerts });
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const allExpiringDocumentIds = alerts.flatMap((a) => a.expiringDocuments.map((d) => d.id));
+  const existingToday = allExpiringDocumentIds.length
+    ? await prisma.notification.findMany({
+        where: {
+          userId: user.id,
+          type: "location",
+          createdAt: { gte: todayStart },
+          relatedDocumentId: { in: allExpiringDocumentIds },
+        },
+        select: { relatedDocumentId: true },
+      })
+    : [];
+  const existingDocIds = new Set(
+    existingToday
+      .map((n) => n.relatedDocumentId)
+      .filter((id): id is string => typeof id == "string" && id.length > 0),
+  );
+
+  const sendEmails = isEmailConfigured();
+  const me = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { email: true, settings: { select: { emailAlerts: true } } },
+  });
+  const shouldEmail = !!(sendEmails && me?.email && me.settings?.emailAlerts);
+
+  const rows: Array<{
+    userId: string;
+    title: string;
+    message: string;
+    type: "location";
+    relatedDocumentId: string;
+    relatedBranchId: string;
+  }> = [];
+  const emailTasks: Array<Promise<unknown>> = [];
+  let emailAttempts = 0;
+  let emailSent = 0;
+  let emailFailed = 0;
+
+  for (const alert of alerts) {
+    for (const doc of alert.expiringDocuments) {
+      if (existingDocIds.has(doc.id)) continue;
+      rows.push({
+        userId: user.id,
+        title: `Near renewal zone: ${alert.branchName}`,
+        message: `You are near ${alert.branchName}. ${doc.name} may need renewal soon.`,
+        type: "location",
+        relatedDocumentId: doc.id,
+        relatedBranchId: alert.branchId,
+      });
+      existingDocIds.add(doc.id);
+      if (shouldEmail) {
+        emailAttempts += 1;
+        emailTasks.push(
+          sendLocationZoneAlertEmail({
+            to: me!.email,
+            documentName: doc.name,
+            branchName: alert.branchName,
+          })
+            .then(() => {
+              emailSent += 1;
+            })
+            .catch((err) => {
+              emailFailed += 1;
+              console.error("Failed to send location zone email", {
+                userId: user.id,
+                documentId: doc.id,
+                branchId: alert.branchId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }),
+        );
+      }
+    }
+  }
+
+  if (rows.length > 0) {
+    await prisma.notification.createMany({ data: rows });
+  }
+  if (emailTasks.length > 0) {
+    await Promise.all(emailTasks);
+  }
+
+  return ok({
+    alerts,
+    createdNotifications: rows.length,
+    emailConfigured: sendEmails,
+    emailAttempts,
+    emailSent,
+    emailFailed,
+  });
 }

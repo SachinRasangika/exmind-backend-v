@@ -27,7 +27,8 @@ model User {
   notifications    Notification[]
   settings         UserSettings?
   gmailIntegration GmailIntegration?
-  invitationsSent  WorkspaceInvitation[] @relation("InvitationSender")
+  invitationsSent     WorkspaceInvitation[] @relation("InvitationSender")
+  invitationsReceived   WorkspaceInvitation[] @relation("InvitationReceiver")
   workspaceMembers WorkspaceMember[]
   ownedWorkspaces  Workspace[]           @relation("WorkspaceOwner")
 
@@ -178,18 +179,20 @@ model BranchFeedback {
 }
 
 model Notification {
-  id                String           @id @default(uuid()) @db.Uuid
-  userId            String           @map("user_id") @db.Uuid
-  title             String
-  message           String
-  type              NotificationType
-  read              Boolean          @default(false)
-  relatedDocumentId String?          @map("related_document_id") @db.Uuid
-  relatedBranchId   String?          @map("related_branch_id") @db.Uuid
-  createdAt         DateTime         @default(now()) @map("created_at")
-  branch            Branch?          @relation(fields: [relatedBranchId], references: [id])
-  document          Document?        @relation(fields: [relatedDocumentId], references: [id])
-  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                    String                 @id @default(uuid()) @db.Uuid
+  userId                String                 @map("user_id") @db.Uuid
+  title                 String
+  message               String
+  type                  NotificationType
+  read                  Boolean                @default(false)
+  relatedDocumentId     String?                @map("related_document_id") @db.Uuid
+  relatedBranchId       String?                @map("related_branch_id") @db.Uuid
+  relatedInvitationId   String?                @map("related_invitation_id") @db.Uuid
+  createdAt             DateTime               @default(now()) @map("created_at")
+  branch                Branch?                @relation(fields: [relatedBranchId], references: [id])
+  document              Document?              @relation(fields: [relatedDocumentId], references: [id])
+  relatedInvitation     WorkspaceInvitation?   @relation(fields: [relatedInvitationId], references: [id], onDelete: SetNull)
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
 }
@@ -226,17 +229,21 @@ model ErrorLog {
 }
 
 model WorkspaceInvitation {
-  id          String           @id @default(uuid()) @db.Uuid
-  workspaceId String           @map("workspace_id") @db.Uuid
-  invitedBy   String           @map("invited_by") @db.Uuid
-  email       String
-  role        WorkspaceRole
-  status      InvitationStatus @default(pending)
-  token       String           @unique
-  expiresAt   DateTime         @map("expires_at")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  sender      User             @relation("InvitationSender", fields: [invitedBy], references: [id], onDelete: Cascade)
-  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id             String           @id @default(uuid()) @db.Uuid
+  workspaceId    String           @map("workspace_id") @db.Uuid
+  invitedBy      String           @map("invited_by") @db.Uuid
+  /// Snapshot for email-based invites; for user invites copied from [receiver].
+  email          String
+  role           WorkspaceRole
+  status         InvitationStatus @default(pending)
+  token          String           @unique
+  expiresAt      DateTime         @map("expires_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  receiverUserId String?          @map("receiver_user_id") @db.Uuid
+  receiver       User?            @relation("InvitationReceiver", fields: [receiverUserId], references: [id], onDelete: Cascade)
+  sender         User             @relation("InvitationSender", fields: [invitedBy], references: [id], onDelete: Cascade)
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  notifications  Notification[]
 
   @@map("workspace_invitations")
 }
@@ -345,6 +352,7 @@ enum InvitationStatus {
   pending
   accepted
   expired
+  declined
 }
 
 enum ActivityType {

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { fail, ok } from "@/lib/http";
 import { hashPassword, signAccessToken } from "@/lib/auth";
+import { recordSessionWelcomeNotification } from "@/lib/session-welcome-notification";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -56,6 +57,11 @@ export async function POST(req: Request) {
       },
     },
     select: { id: true },
+  });
+
+  await recordSessionWelcomeNotification(user.id, {
+    displayName: name,
+    isNewAccount: true,
   });
 
   const accessToken = signAccessToken({ userId: user.id, email: user.email });
